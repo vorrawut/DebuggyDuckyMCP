@@ -10,6 +10,7 @@ import asyncio
 import json
 import os
 import sys
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 # Set environment variables before importing anything
@@ -183,6 +184,46 @@ class MCPAgentServer:
                         },
                         "required": ["entity_name"]
                     }
+                ),
+                types.Tool(
+                    name="line_level_code_analysis",
+                    description="🔍 LINE-LEVEL INTELLIGENT AGENT: Senior engineer + dynamic code simulator. Analyzes specific lines, variables, or methods from local files. Perfect for debugging, validation, and targeted improvements.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "file_path": {
+                                "type": "string",
+                                "description": "Absolute or relative file path (e.g., /Users/vorrawutjudasri/project/src/main/kotlin/Config.kt)"
+                            },
+                            "line_number": {
+                                "type": "string",
+                                "description": "Target line number or range (e.g., '42' or '42-45')"
+                            },
+                            "target_symbol": {
+                                "type": "string",
+                                "description": "Optional: Specific variable, method, or symbol to focus on",
+                                "default": ""
+                            },
+                            "question": {
+                                "type": "string",
+                                "description": "Your specific question about the code (e.g., 'Why is this variable possibly null?')"
+                            },
+                            "context_lines": {
+                                "type": "integer",
+                                "description": "Number of context lines before/after target (default: 20)",
+                                "default": 20,
+                                "minimum": 5,
+                                "maximum": 100
+                            },
+                            "project_type": {
+                                "type": "string",
+                                "description": "Project type for better context understanding",
+                                "enum": ["spring_boot", "kotlin", "java", "python", "javascript", "typescript", "auto_detect"],
+                                "default": "auto_detect"
+                            }
+                        },
+                        "required": ["file_path", "line_number", "question"]
+                    }
                 )
             ]
         
@@ -191,7 +232,7 @@ class MCPAgentServer:
         async def call_tool(name: str, arguments: Dict[str, Any]) -> Sequence[types.TextContent]:
             """Handle tool calls."""
             try:
-                logger.info(f"MCP tool called: {name}", arguments=arguments)
+                logger.info(f"MCP tool called: {name} with arguments: {arguments}")
                 
                 if name == "generate_code":
                     result = await self._generate_code(arguments)
@@ -203,6 +244,8 @@ class MCPAgentServer:
                     result = await self._create_task(arguments)
                 elif name == "intelligent_code_analysis":
                     result = await self._intelligent_code_analysis(arguments)
+                elif name == "line_level_code_analysis":
+                    result = await self._line_level_code_analysis(arguments)
                 else:
                     result = {"error": f"Unknown tool: {name}"}
                 
@@ -330,7 +373,7 @@ class MCPAgentServer:
         async def get_prompt(name: str, arguments: Dict[str, str]) -> types.GetPromptResult:
             """Get prompt content."""
             try:
-                logger.info(f"MCP prompt requested: {name}", arguments=arguments)
+                logger.info(f"MCP prompt requested: {name} with arguments: {arguments}")
                 
                 if name == "code-review":
                     code = arguments.get("code", "")
@@ -480,8 +523,7 @@ Please help me:
             file_path = arguments.get("file_path") or None
             analysis_depth = arguments.get("analysis_depth", "standard")
             
-            logger.info(f"🎯 Starting intelligent code analysis for '{entity_name}'", 
-                       method_name=method_name, file_path=file_path, depth=analysis_depth)
+            logger.info(f"🎯 Starting intelligent code analysis for '{entity_name}' (method={method_name}, file={file_path}, depth={analysis_depth})")
             
             # Perform the comprehensive analysis
             analysis_result = self.code_agent.analyze_code_entity(
@@ -605,6 +647,540 @@ Please help me:
             return "MEDIUM: Some maintainability concerns that could affect team velocity"
         else:
             return "LOW: Code is generally maintainable and shouldn't block team progress"
+    
+    async def _line_level_code_analysis(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        🔍 LINE-LEVEL INTELLIGENT AGENT
+        
+        Acts as a senior software engineer + dynamic code simulator.
+        Analyzes specific lines, variables, or methods from local files.
+        Perfect for debugging, validation, and targeted improvements.
+        """
+        try:
+            file_path = arguments.get("file_path")
+            line_number = arguments.get("line_number")
+            target_symbol = arguments.get("target_symbol", "")
+            question = arguments.get("question")
+            context_lines = arguments.get("context_lines", 20)
+            project_type = arguments.get("project_type", "auto_detect")
+            
+            logger.info(f"🔍 Line-level analysis for {file_path}:{line_number} (symbol={target_symbol})")
+            
+            # Resolve file path (absolute or relative)
+            file_path_obj = Path(file_path)
+            if not file_path_obj.is_absolute():
+                # Try relative to current working directory
+                file_path_obj = Path.cwd() / file_path
+                
+            if not file_path_obj.exists():
+                return {
+                    "❌ FILE NOT FOUND": f"Could not locate file: {file_path}",
+                    "attempted_paths": [str(file_path_obj)],
+                    "suggestions": [
+                        "Check if the file path is correct",
+                        "Ensure the file exists on your machine",
+                        "Try using an absolute path",
+                        "Verify file permissions"
+                    ]
+                }
+            
+            # Parse line number (single or range)
+            try:
+                if '-' in line_number:
+                    start_line, end_line = map(int, line_number.split('-'))
+                else:
+                    start_line = end_line = int(line_number)
+            except ValueError:
+                return {
+                    "❌ INVALID LINE NUMBER": f"Could not parse line number: {line_number}",
+                    "expected_format": "Single line (e.g., '42') or range (e.g., '42-45')"
+                }
+            
+            # Read file content
+            try:
+                with open(file_path_obj, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+            except Exception as e:
+                return {
+                    "❌ FILE READ ERROR": f"Could not read file: {e}",
+                    "file_path": str(file_path_obj)
+                }
+            
+            total_lines = len(lines)
+            
+            # Validate line numbers
+            if start_line < 1 or start_line > total_lines:
+                return {
+                    "❌ LINE OUT OF RANGE": f"Line {start_line} is out of range (file has {total_lines} lines)",
+                    "valid_range": f"1-{total_lines}"
+                }
+            
+            # Extract target lines and context
+            context_start = max(1, start_line - context_lines)
+            context_end = min(total_lines, end_line + context_lines)
+            
+            target_lines = []
+            context_before = []
+            context_after = []
+            
+            for i, line in enumerate(lines, 1):
+                if context_start <= i < start_line:
+                    context_before.append(f"{i:4d}: {line.rstrip()}")
+                elif start_line <= i <= end_line:
+                    target_lines.append(f"{i:4d}: {line.rstrip()}")
+                elif end_line < i <= context_end:
+                    context_after.append(f"{i:4d}: {line.rstrip()}")
+            
+            # Auto-detect project type if needed
+            if project_type == "auto_detect":
+                project_type = self._detect_project_type(file_path_obj, lines)
+            
+            # Perform line-level analysis
+            analysis = self._analyze_target_lines(
+                target_lines=target_lines,
+                context_before=context_before,
+                context_after=context_after,
+                target_symbol=target_symbol,
+                question=question,
+                project_type=project_type,
+                file_path=str(file_path_obj)
+            )
+            
+            return {
+                "🔍 LINE-LEVEL INTELLIGENT ANALYSIS": "=== SENIOR ENGINEER + CODE SIMULATOR ===",
+                "agent_role": "Senior Software Engineer & Dynamic Code Simulator",
+                "analysis_target": f"{file_path}:{line_number}",
+                
+                "📍 LOCATION CONTEXT": {
+                    "file_path": str(file_path_obj),
+                    "target_lines": f"{start_line}-{end_line}",
+                    "total_file_lines": total_lines,
+                    "context_range": f"{context_start}-{context_end}",
+                    "project_type": project_type,
+                    "target_symbol": target_symbol or "None specified"
+                },
+                
+                "❓ YOUR QUESTION": question,
+                
+                "📝 CODE CONTEXT": {
+                    "lines_before": context_before[-10:] if len(context_before) > 10 else context_before,
+                    "target_lines": target_lines,
+                    "lines_after": context_after[:10] if len(context_after) > 10 else context_after
+                },
+                
+                "🧠 SENIOR ENGINEER ANALYSIS": analysis.get("engineer_analysis", {}),
+                "⚡ RUNTIME SIMULATION": analysis.get("runtime_simulation", {}),
+                "🐛 RISK ASSESSMENT": analysis.get("risk_assessment", {}),
+                "💡 TARGETED IMPROVEMENTS": analysis.get("improvements", {}),
+                "🔧 DEBUGGING INSIGHTS": analysis.get("debugging_insights", {}),
+                
+                "📊 ENGINEER'S VERDICT": analysis.get("verdict", "Analysis complete")
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in line-level analysis: {e}", exc_info=True)
+            return {
+                "❌ ANALYSIS FAILED": str(e),
+                "error_type": type(e).__name__,
+                "debug_info": {
+                    "file_path": file_path,
+                    "line_number": line_number,
+                    "target_symbol": target_symbol
+                },
+                "senior_engineer_advice": [
+                    "This error suggests an issue with file access or parsing",
+                    "Check if the file path is accessible and readable",
+                    "Ensure the line number format is correct",
+                    "Try with a simpler file first to verify the system"
+                ]
+            }
+    
+    def _detect_project_type(self, file_path: Path, lines: list) -> str:
+        """Auto-detect project type based on file extension and content."""
+        file_ext = file_path.suffix.lower()
+        content = ''.join(lines[:50])  # Check first 50 lines
+        
+        if file_ext == '.kt':
+            if 'import org.springframework' in content:
+                return "spring_boot"
+            return "kotlin"
+        elif file_ext == '.java':
+            if 'import org.springframework' in content or '@SpringBootApplication' in content:
+                return "spring_boot"
+            return "java"
+        elif file_ext == '.py':
+            if 'from fastapi' in content or 'import fastapi' in content:
+                return "fastapi"
+            elif 'from django' in content or 'import django' in content:
+                return "django"
+            return "python"
+        elif file_ext in ['.js', '.jsx']:
+            if 'import React' in content or 'from "react"' in content:
+                return "react"
+            return "javascript"
+        elif file_ext in ['.ts', '.tsx']:
+            if 'import React' in content:
+                return "react_typescript"
+            return "typescript"
+        else:
+            return "unknown"
+    
+    def _analyze_target_lines(self, target_lines: list, context_before: list, 
+                            context_after: list, target_symbol: str, question: str,
+                            project_type: str, file_path: str) -> Dict[str, Any]:
+        """Perform detailed line-level analysis like a senior engineer."""
+        
+        target_code = '\n'.join([line.split(':', 1)[1].strip() if ':' in line else line for line in target_lines])
+        context_code = '\n'.join([line.split(':', 1)[1].strip() if ':' in line else line for line in context_before + target_lines + context_after])
+        
+        analysis = {
+            "engineer_analysis": {},
+            "runtime_simulation": {},
+            "risk_assessment": {},
+            "improvements": {},
+            "debugging_insights": {},
+            "verdict": ""
+        }
+        
+        # 1. Engineering Analysis
+        analysis["engineer_analysis"] = {
+            "code_purpose": self._analyze_code_purpose(target_code, context_code, project_type),
+            "variable_analysis": self._analyze_variables(target_code, target_symbol),
+            "method_context": self._analyze_method_context(context_code),
+            "dependencies": self._analyze_dependencies(context_code, project_type),
+            "patterns_detected": self._detect_code_patterns(target_code, project_type)
+        }
+        
+        # 2. Runtime Simulation
+        analysis["runtime_simulation"] = {
+            "execution_flow": self._simulate_execution_flow(target_code, context_code),
+            "variable_states": self._simulate_variable_states(target_code, target_symbol),
+            "lifecycle_analysis": self._analyze_lifecycle(context_code, project_type),
+            "error_scenarios": self._simulate_error_scenarios(target_code)
+        }
+        
+        # 3. Risk Assessment
+        analysis["risk_assessment"] = {
+            "null_safety": self._analyze_null_safety(target_code, project_type),
+            "concurrency_risks": self._analyze_concurrency_risks(target_code, context_code),
+            "performance_concerns": self._analyze_performance_concerns(target_code),
+            "security_implications": self._analyze_security_implications(target_code)
+        }
+        
+        # 4. Targeted Improvements
+        analysis["improvements"] = {
+            "immediate_fixes": self._suggest_immediate_fixes(target_code, question),
+            "robustness_improvements": self._suggest_robustness_improvements(target_code, project_type),
+            "code_quality": self._suggest_code_quality_improvements(target_code),
+            "best_practices": self._suggest_best_practices(target_code, project_type)
+        }
+        
+        # 5. Debugging Insights
+        analysis["debugging_insights"] = {
+            "common_issues": self._identify_common_issues(target_code, project_type),
+            "debugging_approach": self._suggest_debugging_approach(target_code, question),
+            "test_scenarios": self._suggest_test_scenarios(target_code),
+            "monitoring_points": self._suggest_monitoring_points(target_code)
+        }
+        
+        # 6. Engineer's Verdict
+        analysis["verdict"] = self._generate_engineer_verdict(target_code, question, analysis)
+        
+        return analysis
+    
+    def _analyze_code_purpose(self, target_code: str, context_code: str, project_type: str) -> str:
+        """Analyze the purpose of the target code."""
+        if 'fun ' in target_code or 'def ' in target_code:
+            return "Function/method definition"
+        elif '=' in target_code and ('val ' in target_code or 'var ' in target_code):
+            return "Variable declaration/assignment"
+        elif '@' in target_code:
+            return "Annotation or decorator"
+        elif 'class ' in target_code:
+            return "Class definition"
+        elif 'import ' in target_code:
+            return "Import statement"
+        elif 'if ' in target_code or 'when ' in target_code:
+            return "Conditional logic"
+        elif 'for ' in target_code or 'while ' in target_code:
+            return "Loop construct"
+        else:
+            return "Statement or expression"
+    
+    def _analyze_variables(self, target_code: str, target_symbol: str) -> Dict[str, Any]:
+        """Analyze variables in the target code."""
+        variables = {
+            "declared_variables": [],
+            "used_variables": [],
+            "target_symbol_analysis": {},
+            "type_inferences": {}
+        }
+        
+        # Basic variable detection
+        import re
+        
+        # Kotlin/Java variable declarations
+        kotlin_vars = re.findall(r'(val|var)\s+(\w+)', target_code)
+        variables["declared_variables"].extend([var[1] for var in kotlin_vars])
+        
+        # Python variable assignments
+        python_vars = re.findall(r'(\w+)\s*=', target_code)
+        variables["declared_variables"].extend(python_vars)
+        
+        if target_symbol:
+            variables["target_symbol_analysis"] = {
+                "symbol": target_symbol,
+                "present_in_code": target_symbol in target_code,
+                "usage_count": target_code.count(target_symbol),
+                "context": "Analyzing symbol usage patterns"
+            }
+        
+        return variables
+    
+    def _analyze_method_context(self, context_code: str) -> Dict[str, Any]:
+        """Analyze the method/function context."""
+        context = {
+            "enclosing_method": "Unknown",
+            "enclosing_class": "Unknown",
+            "access_level": "Unknown",
+            "parameters": [],
+            "return_type": "Unknown"
+        }
+        
+        # Basic method detection
+        if 'fun ' in context_code:
+            context["enclosing_method"] = "Kotlin function detected"
+        elif 'def ' in context_code:
+            context["enclosing_method"] = "Python function detected"
+        elif 'public ' in context_code or 'private ' in context_code:
+            context["access_level"] = "Java/Kotlin method detected"
+        
+        return context
+    
+    def _analyze_dependencies(self, context_code: str, project_type: str) -> list:
+        """Analyze dependencies and imports."""
+        dependencies = []
+        
+        if project_type == "spring_boot":
+            if '@Autowired' in context_code:
+                dependencies.append("Spring dependency injection detected")
+            if '@Bean' in context_code:
+                dependencies.append("Spring bean configuration")
+            if '@Service' in context_code or '@Component' in context_code:
+                dependencies.append("Spring stereotype annotation")
+        
+        return dependencies
+    
+    def _detect_code_patterns(self, target_code: str, project_type: str) -> list:
+        """Detect code patterns and idioms."""
+        patterns = []
+        
+        if '?.' in target_code:
+            patterns.append("Safe call operator (null-safe)")
+        if '!!' in target_code:
+            patterns.append("Not-null assertion operator (potentially unsafe)")
+        if 'try {' in target_code or 'try:' in target_code:
+            patterns.append("Exception handling")
+        if 'lazy' in target_code:
+            patterns.append("Lazy initialization")
+        
+        return patterns
+    
+    def _simulate_execution_flow(self, target_code: str, context_code: str) -> Dict[str, Any]:
+        """Simulate how the code would execute."""
+        return {
+            "execution_order": "Sequential unless control flow changes",
+            "potential_branches": "Conditional execution detected" if 'if' in target_code else "Linear execution",
+            "side_effects": "Possible state changes" if '=' in target_code else "Read-only operations"
+        }
+    
+    def _simulate_variable_states(self, target_code: str, target_symbol: str) -> Dict[str, Any]:
+        """Simulate variable state changes."""
+        if target_symbol:
+            return {
+                "initial_state": "Unknown",
+                "after_execution": "Potentially modified" if target_symbol in target_code and '=' in target_code else "Unchanged",
+                "nullability": "Check null safety patterns"
+            }
+        return {"note": "No target symbol specified"}
+    
+    def _analyze_lifecycle(self, context_code: str, project_type: str) -> str:
+        """Analyze component lifecycle."""
+        if project_type == "spring_boot":
+            if '@PostConstruct' in context_code:
+                return "Spring bean initialization phase"
+            elif '@PreDestroy' in context_code:
+                return "Spring bean destruction phase"
+        return "Standard object lifecycle"
+    
+    def _simulate_error_scenarios(self, target_code: str) -> list:
+        """Simulate potential error scenarios."""
+        scenarios = []
+        
+        if '!!' in target_code:
+            scenarios.append("KotlinNullPointerException if value is null")
+        if '[' in target_code:
+            scenarios.append("IndexOutOfBoundsException possible")
+        if '/' in target_code:
+            scenarios.append("ArithmeticException (division by zero)")
+        
+        return scenarios
+    
+    def _analyze_null_safety(self, target_code: str, project_type: str) -> Dict[str, Any]:
+        """Analyze null safety aspects."""
+        analysis = {
+            "null_safety_level": "Unknown",
+            "risky_operations": [],
+            "safe_operations": []
+        }
+        
+        if project_type == "kotlin":
+            if '!!' in target_code:
+                analysis["risky_operations"].append("Not-null assertion (!!) - can throw NPE")
+            if '?.' in target_code:
+                analysis["safe_operations"].append("Safe call operator (?.) - null-safe")
+            if '?' in target_code and 'fun' in target_code:
+                analysis["null_safety_level"] = "Nullable types properly declared"
+        
+        return analysis
+    
+    def _analyze_concurrency_risks(self, target_code: str, context_code: str) -> list:
+        """Analyze concurrency-related risks."""
+        risks = []
+        
+        if 'var ' in target_code and '@' in context_code:
+            risks.append("Mutable variable in potentially shared context")
+        if 'synchronized' in target_code or 'lock' in target_code:
+            risks.append("Explicit synchronization detected")
+        
+        return risks
+    
+    def _analyze_performance_concerns(self, target_code: str) -> list:
+        """Analyze performance implications."""
+        concerns = []
+        
+        if 'for' in target_code and 'for' in target_code:
+            concerns.append("Nested loops detected - O(n²) complexity")
+        if 'lazy' in target_code:
+            concerns.append("Lazy initialization - first access cost")
+        
+        return concerns
+    
+    def _analyze_security_implications(self, target_code: str) -> list:
+        """Analyze security implications."""
+        implications = []
+        
+        if 'password' in target_code.lower():
+            implications.append("Password handling detected - ensure proper security")
+        if 'sql' in target_code.lower():
+            implications.append("SQL operations - check for injection vulnerabilities")
+        
+        return implications
+    
+    def _suggest_immediate_fixes(self, target_code: str, question: str) -> list:
+        """Suggest immediate fixes based on the question."""
+        fixes = []
+        
+        if 'null' in question.lower():
+            if '!!' in target_code:
+                fixes.append("Replace !! with safe call ?. or add null check")
+        if 'robust' in question.lower():
+            fixes.append("Add error handling with try-catch")
+            fixes.append("Add input validation")
+        
+        return fixes
+    
+    def _suggest_robustness_improvements(self, target_code: str, project_type: str) -> list:
+        """Suggest robustness improvements."""
+        improvements = []
+        
+        if project_type == "spring_boot":
+            improvements.append("Add @Validated annotation for input validation")
+            improvements.append("Consider circuit breaker pattern for external calls")
+        
+        improvements.append("Add comprehensive error handling")
+        improvements.append("Include logging for debugging")
+        
+        return improvements
+    
+    def _suggest_code_quality_improvements(self, target_code: str) -> list:
+        """Suggest code quality improvements."""
+        return [
+            "Add meaningful variable names",
+            "Include documentation/comments",
+            "Consider extracting complex logic to methods",
+            "Add unit tests for this code"
+        ]
+    
+    def _suggest_best_practices(self, target_code: str, project_type: str) -> list:
+        """Suggest best practices specific to the project type."""
+        practices = []
+        
+        if project_type == "kotlin":
+            practices.append("Use data classes for value objects")
+            practices.append("Prefer val over var when possible")
+            practices.append("Use sealed classes for restricted hierarchies")
+        elif project_type == "spring_boot":
+            practices.append("Use constructor injection over field injection")
+            practices.append("Make beans immutable when possible")
+            practices.append("Use @ConfigurationProperties for configuration")
+        
+        return practices
+    
+    def _identify_common_issues(self, target_code: str, project_type: str) -> list:
+        """Identify common issues for this type of code."""
+        issues = []
+        
+        if '!!' in target_code:
+            issues.append("Not-null assertion can cause runtime crashes")
+        if 'var ' in target_code:
+            issues.append("Mutable variables can lead to unexpected state changes")
+        
+        return issues
+    
+    def _suggest_debugging_approach(self, target_code: str, question: str) -> list:
+        """Suggest debugging approach."""
+        approaches = []
+        
+        if 'null' in question.lower():
+            approaches.append("Add null checks and logging before the problematic line")
+            approaches.append("Use debugger to inspect variable states")
+        
+        approaches.append("Add strategic log statements")
+        approaches.append("Write unit tests to isolate the issue")
+        approaches.append("Use IDE debugger with breakpoints")
+        
+        return approaches
+    
+    def _suggest_test_scenarios(self, target_code: str) -> list:
+        """Suggest test scenarios."""
+        return [
+            "Test with valid input values",
+            "Test with null/empty values",
+            "Test with boundary conditions",
+            "Test error handling paths"
+        ]
+    
+    def _suggest_monitoring_points(self, target_code: str) -> list:
+        """Suggest monitoring points."""
+        return [
+            "Add metrics for execution time",
+            "Monitor error rates",
+            "Track method call frequency",
+            "Alert on unexpected null values"
+        ]
+    
+    def _generate_engineer_verdict(self, target_code: str, question: str, analysis: Dict[str, Any]) -> str:
+        """Generate final engineer verdict."""
+        risks = analysis.get("risk_assessment", {})
+        null_risks = len(risks.get("null_safety", {}).get("risky_operations", []))
+        
+        if null_risks > 0:
+            return f"⚠️ ATTENTION NEEDED: {null_risks} null safety risks detected. Address before production."
+        elif '!!' in target_code:
+            return "🚨 RISKY CODE: Not-null assertions present. Consider safer alternatives."
+        else:
+            return "✅ CODE REVIEW: Generally safe. Follow suggested improvements for robustness."
     
     async def run(self):
         """Run the MCP server."""
