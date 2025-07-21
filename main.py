@@ -16,9 +16,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 
-from mcp import __version__, __description__
-from mcp.config import get_settings
-from mcp.config.logging import setup_logging, get_logger, request_logging_context
+from mcp_system import __version__, __description__
+from mcp_system.config import get_settings
+from mcp_system.config.logging import setup_logging, get_logger, request_logging_context
 
 
 # Setup logging before anything else

@@ -7,6 +7,9 @@ pydantic-settings==2.0.3
 # HTTP Client
 httpx==0.25.2
 
+# MCP Protocol Support
+mcp>=1.0.0
+
 # Database & Storage
 sqlalchemy==2.0.23
 alembic==1.12.1

@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "mcp-agentic-server": {
+      "command": "python",
+      "args": ["mcp_agentic_server.py"],
+      "cwd": ".",
+      "env": {
+        "MCP_SECRET_KEY": "dev-secret-key-change-in-production",
+        "MCP_DATABASE_URL": "postgresql://test:test@localhost:5432/test",
+        "MCP_ENVIRONMENT": "development"
+      }
+    }
+  }
+} 
