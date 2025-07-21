@@ -26,9 +26,16 @@ from mcp.server.stdio import stdio_server
 # Import local modules
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mcp_system.config import get_settings
-from mcp_system.config.logging import get_logger
+from enhanced_code_agent import IntelligentCodeAgent
 
-logger = get_logger(__name__)
+# Configure logging to go to stderr to avoid conflicts with MCP JSON-RPC protocol
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    stream=sys.stderr  # Important: Use stderr to avoid stdout contamination
+)
+logger = logging.getLogger(__name__)
 
 
 class MCPAgentServer:
@@ -37,6 +44,7 @@ class MCPAgentServer:
     def __init__(self):
         self.server = Server("mcp-agentic-server")
         self.settings = get_settings()
+        self.code_agent = IntelligentCodeAgent()
         self._setup_capabilities()
     
     def _setup_capabilities(self):
@@ -145,6 +153,36 @@ class MCPAgentServer:
                         },
                         "required": ["title", "description"]
                     }
+                ),
+                types.Tool(
+                    name="intelligent_code_analysis",
+                    description="🎯 INTELLIGENT SOFTWARE AGENT: Simulate and debug source code like a senior engineer. Understands purpose, simulates behavior across states, identifies risks/bugs, and suggests meaningful improvements.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "entity_name": {
+                                "type": "string",
+                                "description": "Class name, method name, or function name to analyze"
+                            },
+                            "method_name": {
+                                "type": "string",
+                                "description": "Optional: Specific method within a class to analyze",
+                                "default": ""
+                            },
+                            "file_path": {
+                                "type": "string",
+                                "description": "Optional: Specific file path to search in (relative to project root)",
+                                "default": ""
+                            },
+                            "analysis_depth": {
+                                "type": "string",
+                                "description": "Depth of analysis to perform",
+                                "enum": ["quick", "standard", "deep"],
+                                "default": "standard"
+                            }
+                        },
+                        "required": ["entity_name"]
+                    }
                 )
             ]
         
@@ -163,6 +201,8 @@ class MCPAgentServer:
                     result = await self._execute_code(arguments)
                 elif name == "create_task":
                     result = await self._create_task(arguments)
+                elif name == "intelligent_code_analysis":
+                    result = await self._intelligent_code_analysis(arguments)
                 else:
                     result = {"error": f"Unknown tool: {name}"}
                 
@@ -421,6 +461,150 @@ Please help me:
             "created_at": "2025-01-21T07:00:00Z",
             "status": "pending"
         }
+    
+    async def _intelligent_code_analysis(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        🎯 INTELLIGENT SOFTWARE AGENT
+        
+        Simulate and debug source code like a senior engineer would:
+        1. Understand the purpose and intent of the class/method
+        2. Simulate how it behaves across different states and inputs
+        3. Debug the logic and identify risks or bugs
+        4. Suggest meaningful improvements
+        5. Think step-by-step and show execution behavior
+        6. Ask clarification questions if logic is unclear
+        """
+        try:
+            entity_name = arguments.get("entity_name")
+            method_name = arguments.get("method_name") or None
+            file_path = arguments.get("file_path") or None
+            analysis_depth = arguments.get("analysis_depth", "standard")
+            
+            logger.info(f"🎯 Starting intelligent code analysis for '{entity_name}'", 
+                       method_name=method_name, file_path=file_path, depth=analysis_depth)
+            
+            # Perform the comprehensive analysis
+            analysis_result = self.code_agent.analyze_code_entity(
+                entity_name=entity_name,
+                method_name=method_name,
+                file_path=file_path
+            )
+            
+            # Enhance the result with agent-specific insights
+            enhanced_result = {
+                "🎯 INTELLIGENT AGENT ANALYSIS": "=== SENIOR ENGINEER CODE REVIEW ===",
+                "agent_role": "Senior Software Engineer",
+                "analysis_approach": "Systematic code simulation and debugging",
+                "timestamp": analysis_result.get("analysis_timestamp"),
+                
+                "📍 CODE LOCATION": {
+                    "entity": entity_name,
+                    "method": method_name,
+                    "file": analysis_result.get("file_location", "Not found"),
+                    "confidence": f"{analysis_result.get('confidence_score', 0):.1f}%"
+                },
+                
+                "🧠 PURPOSE & INTENT": analysis_result.get("purpose_analysis", {}),
+                
+                "⚡ BEHAVIOR SIMULATION": {
+                    "description": "How this code behaves across different states and inputs",
+                    "simulation_results": analysis_result.get("behavior_simulation", {}),
+                    "step_by_step_execution": analysis_result.get("execution_flow", {})
+                },
+                
+                "🐛 RISK & BUG ANALYSIS": {
+                    "description": "Debugging the logic and identifying potential issues",
+                    "findings": analysis_result.get("risk_analysis", {}),
+                    "critical_issues": len(analysis_result.get("risk_analysis", {}).get("severity_levels", {}).get("critical", [])),
+                    "high_priority_issues": len(analysis_result.get("risk_analysis", {}).get("severity_levels", {}).get("high", []))
+                },
+                
+                "💡 MEANINGFUL IMPROVEMENTS": {
+                    "description": "Actionable recommendations from a senior engineer perspective",
+                    "suggestions": analysis_result.get("improvements", {}),
+                    "justification": "Each suggestion is based on correctness, readability, and testability principles"
+                },
+                
+                "❓ CLARIFICATION QUESTIONS": {
+                    "description": "Questions to clarify unclear logic or assumptions",
+                    "questions": analysis_result.get("clarification_questions", [])
+                },
+                
+                "📊 TECH LEAD SUMMARY": {
+                    "overall_assessment": self._generate_tech_lead_assessment(analysis_result),
+                    "recommended_next_steps": self._get_prioritized_actions(analysis_result),
+                    "team_impact": self._assess_team_impact(analysis_result)
+                }
+            }
+            
+            # Add error handling if analysis failed
+            if "error" in analysis_result:
+                enhanced_result["❌ ANALYSIS ERROR"] = {
+                    "error": analysis_result["error"],
+                    "debug_info": analysis_result.get("debug_info", {}),
+                    "next_steps": [
+                        "Check if the entity name is spelled correctly",
+                        "Verify the file exists in the project directory",
+                        "Try providing the file_path parameter",
+                        "Check if the code is syntactically valid"
+                    ]
+                }
+            
+            return enhanced_result
+            
+        except Exception as e:
+            logger.error(f"Error in intelligent code analysis: {e}", exc_info=True)
+            return {
+                "❌ ANALYSIS FAILED": str(e),
+                "error_type": type(e).__name__,
+                "senior_engineer_advice": [
+                    "This error suggests the analysis engine encountered an unexpected issue",
+                    "Check the entity name and file path for correctness",
+                    "Ensure the code is syntactically valid Python",
+                    "Try with a simpler entity first to verify the system is working"
+                ]
+            }
+    
+    def _generate_tech_lead_assessment(self, analysis_result: Dict[str, Any]) -> str:
+        """Generate a tech lead style assessment of the code."""
+        confidence = analysis_result.get("confidence_score", 0)
+        critical_issues = len(analysis_result.get("risk_analysis", {}).get("severity_levels", {}).get("critical", []))
+        high_issues = len(analysis_result.get("risk_analysis", {}).get("severity_levels", {}).get("high", []))
+        
+        if critical_issues > 0:
+            return f"🚨 CRITICAL: {critical_issues} critical issues found. Immediate attention required before production."
+        elif high_issues > 2:
+            return f"⚠️ HIGH RISK: {high_issues} high-priority issues. Recommend addressing before next release."
+        elif confidence < 70:
+            return "🔍 NEEDS INVESTIGATION: Analysis confidence is low. More context or documentation needed."
+        else:
+            return "✅ GOOD: Code appears well-structured. Focus on the suggested improvements for optimization."
+    
+    def _get_prioritized_actions(self, analysis_result: Dict[str, Any]) -> List[str]:
+        """Get prioritized actions from the improvements."""
+        improvements = analysis_result.get("improvements", {})
+        prioritized = improvements.get("prioritized_actions", [])
+        
+        if prioritized:
+            return [action.get("improvement", "Unknown action") for action in prioritized[:3]]
+        else:
+            return [
+                "Review the code structure and naming conventions",
+                "Add comprehensive unit tests",
+                "Improve documentation and type hints"
+            ]
+    
+    def _assess_team_impact(self, analysis_result: Dict[str, Any]) -> str:
+        """Assess the impact on the team."""
+        risk_analysis = analysis_result.get("risk_analysis", {})
+        maintainability_issues = len(risk_analysis.get("maintainability_issues", []))
+        
+        if maintainability_issues > 3:
+            return "HIGH: Multiple maintainability issues may slow down team development"
+        elif maintainability_issues > 1:
+            return "MEDIUM: Some maintainability concerns that could affect team velocity"
+        else:
+            return "LOW: Code is generally maintainable and shouldn't block team progress"
     
     async def run(self):
         """Run the MCP server."""
